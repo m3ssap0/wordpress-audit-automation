@@ -1,0 +1,5 @@
+services:
+
+  audit:
+    volumes:
+      - ${SEMGREP_CONFIG}:/audit/semgrep-rules/

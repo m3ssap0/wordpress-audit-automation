@@ -9,4 +9,9 @@ wait_mysql() {
 }
 
 wait_mysql
-python3 ./wordpress-plugin-audit.py --create-schema --download --audit --download-dir /audit/
+
+if [ -d "/audit/semgrep-rules/" ]; then
+    python3 ./wordpress-plugin-audit.py --create-schema --download --audit --download-dir /audit/ --config /audit/semgrep-rules/
+else
+    python3 ./wordpress-plugin-audit.py --create-schema --download --audit --download-dir /audit/
+fi
