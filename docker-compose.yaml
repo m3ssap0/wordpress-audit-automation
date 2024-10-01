@@ -9,10 +9,16 @@ services:
     ports:
       - 3306:3306
     restart: always
+    volumes:
+      - database:/var/lib/mysql
 
   audit:
     build:
       dockerfile: Dockerfile_audit
     restart: always
     depends_on:
+      - database
+
+volumes:
+  database:
       - database
