@@ -5,9 +5,10 @@ import json
 import subprocess
 import zipfile
 import shutil
+import logging
+import time
 from datetime import datetime
 from io import BytesIO
-from tqdm import tqdm
 from dbutils import (
     connect_to_db,
     delete_results_table,
@@ -15,26 +16,46 @@ from dbutils import (
     insert_plugin_into_db,
 )
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
+
+def http_get(url):
+    do_request = True
+    while do_request:
+        try:
+            response = requests.get(url)
+            do_request = False
+        except requests.exceptions.Timeout:
+            logger.warning(f"Request timeout for '{url}'.")
+            time.sleep(5)
+
+    return response
+
 
 # Let's only retrieve 10 plugins per page so people feel like the status bar is actually moving
 def get_plugins(page=1, per_page=10):
     url = f"https://api.wordpress.org/plugins/info/1.2/?action=query_plugins&request[page]={page}&request[per_page]={per_page}"
-    response = requests.get(url)
+    response = http_get(url)
 
     if response.status_code == 200:
         return response.json()
     else:
-        print(f"Failed to retrieve page {page}: {response.status_code}")
+        logger.error(f"Failed to retrieve page {page}: {response.status_code}")
         return None
 
 
 def write_plugins_to_csv_db_and_download(db_conn, cursor, download_dir, verbose=False):
+    logger.info("Download plugins.")
 
     # Get the first page to find out the total number of pages
     data = get_plugins(page=1)
 
     if not data or "info" not in data:
-        print("Failed to retrieve the plugin information.")
+        logger.error("Failed to retrieve the plugin information.")
         return
 
     total_pages = data["info"]["pages"]
@@ -43,7 +64,7 @@ def write_plugins_to_csv_db_and_download(db_conn, cursor, download_dir, verbose=
     os.makedirs(os.path.join(download_dir, "plugins"), exist_ok=True)
 
     # Iterate through the pages
-    for page in tqdm(range(1, total_pages + 1), desc="Downloading plugins"):
+    for page in range(1, total_pages + 1):
         data = get_plugins(page=page)
 
         if not data or "plugins" not in data:
@@ -51,9 +72,10 @@ def write_plugins_to_csv_db_and_download(db_conn, cursor, download_dir, verbose=
 
         for plugin in data["plugins"]:
             insert_plugin_into_db(cursor, plugin)
+            db_conn.commit()
 
             if verbose:
-                print(f"Inserted data for plugin {plugin['slug']}.")
+                logger.info(f"Inserted data for plugin {plugin['slug']}.")
             # Download and extract the plugin
             download_and_extract_plugin(plugin, download_dir, verbose)
 
@@ -71,7 +93,7 @@ def download_and_extract_plugin(plugin, download_dir, verbose):
         if last_updated_year < (datetime.now().year - 2):
             return
     except ValueError:
-        print(f"Invalid date format for plugin {slug}: {last_updated}")
+        logger.error(f"Invalid date format for plugin {slug}: {last_updated}")
         return
 
     # Download and extract the plugin
@@ -80,27 +102,28 @@ def download_and_extract_plugin(plugin, download_dir, verbose):
     # Clear the directory if it exists
     if os.path.exists(plugin_path):
         if verbose:
-            print(f"Plugin folder already exists, deleting folder: {plugin_path}")
+            logger.warning(f"Plugin folder already exists, deleting folder: {plugin_path}")
         shutil.rmtree(plugin_path)
 
     try:
         if verbose:
-            print(f"Downloading and extracting plugin: {slug}")
-        response = requests.get(download_link)
+            logger.info(f"Downloading and extracting plugin: {slug}")
+        response = http_get(download_link)
         response.raise_for_status()  # Raises an HTTPError for bad responses
         with zipfile.ZipFile(BytesIO(response.content)) as z:
             z.extractall(os.path.join(download_dir, "plugins"))
     except requests.RequestException as e:
-        print(f"Failed to download {slug}: {e}")
+        logger.error(f"Failed to download {slug}: {e}")
     except zipfile.BadZipFile:
-        print(f"Failed to unzip {slug}: Not a zip file or corrupt zip file")
+        logger.error(f"Failed to unzip {slug}: Not a zip file or corrupt zip file")
 
 
 def run_semgrep_and_store_results(db_conn, cursor, download_dir, config, verbose=False):
+    logger.info("Run Semgrep and store results.")
 
     plugins = os.listdir(os.path.join(download_dir, "plugins"))
 
-    for plugin in tqdm(plugins, desc="Auditing plugins"):
+    for plugin in plugins:
         plugin_path = os.path.join(download_dir, "plugins", plugin)
         output_file = os.path.join(plugin_path, "semgrep_output.json")
 
@@ -120,14 +143,14 @@ def run_semgrep_and_store_results(db_conn, cursor, download_dir, config, verbose
             # Run the semgrep command
             subprocess.run(command, check=True)
             if verbose:
-                print(f"Semgrep analysis completed for {plugin}.")
+                logger.info(f"Semgrep analysis completed for {plugin}.")
 
         except subprocess.CalledProcessError as e:
-            print(f"Semgrep failed for {plugin}: {e}")
+            logger.error(f"Semgrep failed for {plugin}: {e}")
         except json.JSONDecodeError as e:
-            print(f"Failed to decode JSON for {plugin}: {e}")
+            logger.error(f"Failed to decode JSON for {plugin}: {e}")
         except Exception as e:
-            print(f"Unexpected error for {plugin}: {e}")
+            logger.error(f"Unexpected error for {plugin}: {e}")
 
         # Read the output file and process results
         with open(output_file, "r") as file:
@@ -181,10 +204,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if not args.download and not args.audit:
-        print("Please set either the --download or --audit option.\n")
+        logger.error("Please set either the --download or --audit option.\n")
         parser.print_help()
 
     else:
+        logger.info("Started audit.")
         # Create schema
         db_conn, cursor = connect_to_db(args.create_schema)
         if args.clear_results:
