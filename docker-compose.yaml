@@ -21,4 +21,3 @@ services:
 
 volumes:
   database:
-      - database
