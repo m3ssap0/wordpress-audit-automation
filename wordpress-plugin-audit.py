@@ -32,6 +32,9 @@ def http_get(url):
         except requests.exceptions.Timeout:
             logger.warning(f"Request timeout for '{url}'.")
             time.sleep(5)
+        except requests.exceptions.ConnectionError:
+            logger.warning(f"Connection error for '{url}'.")
+            time.sleep(5)
 
     return response
 
