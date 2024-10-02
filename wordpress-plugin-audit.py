@@ -99,6 +99,15 @@ def download_and_extract_plugin(plugin, download_dir, verbose):
         logger.error(f"Invalid date format for plugin {slug}: {last_updated}")
         return
 
+    # Excluding plugins with few installs.
+    try:
+        active_installs = int(plugin.get("active_installs"))
+        if active_installs < 1000:
+            return
+    except:
+        logger.error(f"Invalid active installs format for plugin {slug}: {active_installs}")
+        return
+
     # Download and extract the plugin
     plugin_path = os.path.join(download_dir, "plugins", slug)
 
