@@ -68,6 +68,9 @@ def write_plugins_to_csv_db_and_download(db_conn, cursor, download_dir, verbose=
 
     # Iterate through the pages
     for page in range(1, total_pages + 1):
+        if verbose:
+            logger.info(f"Page {page}/{total_pages}.")
+
         data = get_plugins(page=page)
 
         if not data or "plugins" not in data:
@@ -111,11 +114,11 @@ def download_and_extract_plugin(plugin, download_dir, verbose):
     # Download and extract the plugin
     plugin_path = os.path.join(download_dir, "plugins", slug)
 
-    # Clear the directory if it exists
+    # Skip the plugin if the directory exists
     if os.path.exists(plugin_path):
         if verbose:
-            logger.warning(f"Plugin folder already exists, deleting folder: {plugin_path}")
-        shutil.rmtree(plugin_path)
+            logger.warning(f"Plugin folder already exists, skipping folder creation: {plugin_path}")
+        return
 
     try:
         if verbose:
